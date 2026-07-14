@@ -496,32 +496,80 @@ if results:
 
     st.dataframe(df_filtered, use_container_width=True, column_config=column_config)
 
-    col1, col2 = st.columns(2)
+    # =================================================================
+    # グラフ: 「直近1ヶ月に評価が付いたか」の割合を軸別に見る
+    # =================================================================
 
-    with col1:
-        st.subheader("💰 価格帯の分布")
-        if df_filtered["価格"].notna().any():
-            st.bar_chart(df_filtered["価格"].dropna())
+    def build_ratio_table(df, group_col, category_order=None, top_n=None):
+        """
+        group_col ごとに「直近1ヶ月の評価件数が1件以上／0件」の割合(%)を集計する。
+        戻り値: (割合のDataFrame, 件数のDataFrame)
+        """
+        tmp = df.dropna(subset=[group_col]).copy()
+        if tmp.empty:
+            return pd.DataFrame(), pd.DataFrame()
 
-    with col2:
-        st.subheader("🏅 ランク別 件数")
-        if "ランク" in df_filtered.columns:
-            rank_counts = df_filtered["ランク"].value_counts()
-            st.bar_chart(rank_counts)
+        tmp["区分"] = pd.to_numeric(tmp["直近1ヶ月の評価件数"], errors="coerce").fillna(0).apply(
+            lambda x: "1件以上" if x >= 1 else "0件"
+        )
+        counts = tmp.groupby([group_col, "区分"]).size().unstack(fill_value=0)
+        for c in ["0件", "1件以上"]:
+            if c not in counts.columns:
+                counts[c] = 0
+        counts = counts[["0件", "1件以上"]]
 
-    col3, col4 = st.columns(2)
+        if top_n is not None:
+            counts = counts.loc[counts.sum(axis=1).sort_values(ascending=False).head(top_n).index]
 
-    with col3:
-        st.subheader("👤 出品者別 出品数（上位10件）")
-        if "販売者名" in df_filtered.columns:
-            seller_counts = df_filtered["販売者名"].value_counts().head(10)
-            st.bar_chart(seller_counts)
+        if category_order is not None:
+            counts = counts.reindex([c for c in category_order if c in counts.index])
 
-    with col4:
-        st.subheader("⭐ 評価総数 上位10件")
-        if "評価総数" in df_filtered.columns:
-            top_rated = df_filtered.nlargest(10, "評価総数")[["サービス名", "評価総数"]].set_index("サービス名")
-            st.bar_chart(top_rated)
+        pct = counts.div(counts.sum(axis=1), axis=0) * 100
+        return pct, counts
+
+    st.subheader("📊 直近1ヶ月の評価有無（1件以上 / 0件）の割合")
+
+    # ---- 価格帯別 ----
+    price_bins = [-1, 499, 999, 1999, 2999, 4999, 6999, 9999, 19999, float("inf")]
+    price_labels = [
+        "1-499", "500-999", "1000-1999", "2000-2999", "3000-4999",
+        "5000-6999", "7000-9999", "10000-19999", "20000以上",
+    ]
+    df_for_chart = df_filtered.copy()
+    df_for_chart["価格帯"] = pd.cut(
+        pd.to_numeric(df_for_chart["価格"], errors="coerce"),
+        bins=price_bins, labels=price_labels,
+    )
+
+    st.markdown("**価格帯別**")
+    pct_price, counts_price = build_ratio_table(df_for_chart, "価格帯", category_order=price_labels)
+    if not pct_price.empty:
+        st.bar_chart(pct_price)
+        with st.expander("件数の内訳を見る（価格帯別）"):
+            st.dataframe(counts_price, use_container_width=True)
+    else:
+        st.info("価格帯別に表示できるデータがありません。")
+
+    # ---- ランク別 ----
+    rank_order = ["プラチナ", "ゴールド", "シルバー", "ブロンズ", "レギュラー", "なし"]
+    st.markdown("**ランク別**")
+    pct_rank, counts_rank = build_ratio_table(df_filtered, "ランク", category_order=rank_order)
+    if not pct_rank.empty:
+        st.bar_chart(pct_rank)
+        with st.expander("件数の内訳を見る（ランク別）"):
+            st.dataframe(counts_rank, use_container_width=True)
+    else:
+        st.info("ランク別に表示できるデータがありません。")
+
+    # ---- サブカテゴリ別 ----
+    st.markdown("**サブカテゴリ別**（件数の多い上位15件のみ表示）")
+    pct_sub, counts_sub = build_ratio_table(df_filtered, "サブカテゴリ", top_n=15)
+    if not pct_sub.empty:
+        st.bar_chart(pct_sub)
+        with st.expander("件数の内訳を見る（サブカテゴリ別）"):
+            st.dataframe(counts_sub, use_container_width=True)
+    else:
+        st.info("サブカテゴリ別に表示できるデータがありません。")
 
     st.subheader("⬇️ ダウンロード")
     dcol1, dcol2 = st.columns(2)
