@@ -9,77 +9,18 @@ import streamlit as st
 from bs4 import BeautifulSoup
 
 # =====================================================================
-# 定数・マスタデータ
+# 定数
 # =====================================================================
 
-# 「占い」カテゴリ配下のサブカテゴリ（会話中で確認できたものを列挙）
-CATEGORY_OPTIONS = {
-    "占い全般": 661,
-    "占術別（すべて）": 3,
-    "恋愛占い": 656,
-    "結婚占い": 657,
-    "スピリチュアル鑑定": 658,
-    "総合運鑑定": 659,
-    "仕事運・仕事占い": 660,
-    "夢占い": 816,
-    "ペットの気持ち占い": 817,
-    "占いレッスン": 80,
-    "その他占い": 79,
-}
-
-# 占術（technique_ids）フィルタ
-TECHNIQUE_OPTIONS = {
-    "霊視・透視": 21,
-    "タロット": 17,
-    "リーディング": 19,
-    "四柱推命": 24,
-    "オラクルカード": 18,
-    "手相": 27,
-    "西洋占星術": 22,
-    "チャネリング": 35,
-    "ヒーリング": 20,
-    "算命学": 30,
-    "数秘術": 23,
-    "ルノルマンカード": 291,
-    "易占い": 28,
-    "祈祷・祈願": 36,
-    "エネルギーワーク": 34,
-    "思念伝達": 37,
-    "九星気学": 25,
-    "東洋占星術": 31,
-    "姓名判断": 26,
-    "ツインレイ": 290,
-    "宿曜": 33,
-    "ルーン": 32,
-    "アチューメント": 173,
-    "ダウジング": 172,
-    "風水": 29,
-}
-
-SERVICE_KIND_OPTIONS = {
-    "すべて": None,
-    "メッセージ・チャット占い": 0,
-    "電話占い": 1,
-}
-
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+# アクセス間隔（秒）。サーバー負荷を抑えるための固定値。UIでは変更できません。
+SLEEP_SEC = 2.0
 
 
 # =====================================================================
 # スクレイピング用の関数群
 # =====================================================================
-
-def build_category_url(category_id, technique_ids, service_kind):
-    url = f"https://coconala.com/categories/{category_id}"
-    params = []
-    if service_kind is not None:
-        params.append(f"service_kind={service_kind}")
-    for t_id in technique_ids:
-        params.append(f"technique_ids%5B%5D={t_id}")
-    if params:
-        url += "?" + "&".join(params)
-    return url
-
 
 def get_service_urls_page(category_url, page):
     paged_url = f"{category_url}&page={page}" if "?" in category_url else f"{category_url}?page={page}"
@@ -186,6 +127,29 @@ def count_visual_chars(text):
     return len(stripped)
 
 
+def extract_breadcrumbs(soup):
+    """
+    パンくずリスト（nav[aria-label="breadcrumbs"]）からカテゴリ階層を取得する。
+    例: ホーム > 占い > 電話占い > 恋愛占い > 相手の気持ち占い
+    「ホーム」は除外し、階層を " > " で連結した文字列と、
+    大カテゴリ・末端カテゴリをそれぞれ返す。
+    """
+    nav = soup.find("nav", attrs={"aria-label": "breadcrumbs"})
+    if not nav:
+        return None, None, None
+
+    items = [a.get_text(strip=True) for a in nav.select("li a")]
+    items = [t for t in items if t and t != "ホーム"]
+
+    if not items:
+        return None, None, None
+
+    breadcrumb_str = " > ".join(items)
+    top_category = items[0]
+    sub_category = items[-1]
+    return breadcrumb_str, top_category, sub_category
+
+
 def scrape_coconala_service(url):
     res = requests.get(url, headers=HEADERS, timeout=10)
     html = res.text
@@ -201,6 +165,11 @@ def scrape_coconala_service(url):
 
     seller_name_tag = soup.select_one("a.c-profile_nameLink span.c-profile_name")
     data["販売者名"] = seller_name_tag.get_text(strip=True) if seller_name_tag else None
+
+    breadcrumb_str, top_category, sub_category = extract_breadcrumbs(soup)
+    data["カテゴリ階層"] = breadcrumb_str
+    data["大カテゴリ"] = top_category
+    data["サブカテゴリ"] = sub_category
 
     rank_img = soup.find("img", alt=re.compile(r"^出品者ランク："))
     if rank_img:
@@ -299,30 +268,28 @@ if "phase" not in st.session_state:
 with st.sidebar:
     st.header("検索条件")
 
-    category_name = st.selectbox("カテゴリ", list(CATEGORY_OPTIONS.keys()), index=0)
-    category_id = CATEGORY_OPTIONS[category_name]
-
-    technique_names = st.multiselect("占術で絞り込み（任意）", list(TECHNIQUE_OPTIONS.keys()))
-    technique_ids = [TECHNIQUE_OPTIONS[n] for n in technique_names]
-
-    service_kind_name = st.selectbox("提供方法", list(SERVICE_KIND_OPTIONS.keys()))
-    service_kind = SERVICE_KIND_OPTIONS[service_kind_name]
+    category_url_input = st.text_input(
+        "カテゴリ一覧ページのURL",
+        placeholder="https://coconala.com/categories/3?service_kind=0&technique_ids%5B%5D=17",
+        help="ココナラのカテゴリ一覧ページ（絞り込み後）のURLをそのまま貼り付けてください。",
+    )
 
     st.divider()
     st.header("取得設定")
-    max_count = st.slider("取得件数", min_value=5, max_value=300, value=30, step=5)
-    sleep_sec = st.slider("アクセス間隔（秒）", min_value=0.5, max_value=5.0, value=1.5, step=0.5)
+    max_count = st.number_input("取得件数", min_value=1, max_value=1000, value=30, step=1)
+    st.caption(f"アクセス間隔は {SLEEP_SEC} 秒に固定しています（サーバー負荷軽減のため）")
 
     st.divider()
-    start_clicked = st.button("🚀 分析開始", type="primary", use_container_width=True,
-                               disabled=st.session_state.running)
+    start_clicked = st.button(
+        "🚀 分析開始", type="primary", use_container_width=True,
+        disabled=st.session_state.running or not category_url_input,
+    )
     stop_clicked = st.button("⏹ 停止", use_container_width=True,
                               disabled=not st.session_state.running)
 
 # ---- ボタン処理 ----
 if start_clicked and not st.session_state.running:
-    category_url = build_category_url(category_id, technique_ids, service_kind)
-    st.session_state.category_url = category_url
+    st.session_state.category_url = category_url_input
     st.session_state.results = []
     st.session_state.scrape_index = 0
     st.session_state.running = True
@@ -339,7 +306,7 @@ if st.session_state.phase == "collecting_urls":
         urls = collect_service_urls(
             st.session_state.category_url,
             max_count,
-            sleep_sec,
+            SLEEP_SEC,
             stop_check=lambda: st.session_state.stop_requested,
         )
     st.session_state.urls = urls
@@ -371,7 +338,7 @@ if st.session_state.phase == "scraping":
         except Exception as e:
             st.warning(f"取得失敗: {url}（{e}）")
         st.session_state.scrape_index += 1
-        time.sleep(sleep_sec)
+        time.sleep(SLEEP_SEC)
         st.rerun()
 
 # ---- 完了メッセージ ----
