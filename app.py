@@ -1,6 +1,7 @@
 import re
 import time
 import unicodedata
+import io
 from datetime import date, timedelta
 
 import requests
@@ -491,7 +492,7 @@ if results:
 
     st.dataframe(df_filtered, use_container_width=True, column_config=column_config)
 
-    def flatten_for_csv(df):
+    def flatten_for_export(df):
         """
         セル内の改行(\\r\\n・\\n)をスペースに置き換え、
         Excel等で開いたときに1行1レコードになるようにする（ダウンロード用のみ）。
@@ -504,11 +505,25 @@ if results:
                 )
         return df
 
+    def build_excel_bytes(df, column_width=14):
+        """
+        列幅を狭く固定したExcelファイルをメモリ上に作成する。
+        CSVには列幅という概念がないため、狭い列幅を保持したい場合はExcel形式が必要。
+        """
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="サービス一覧")
+            worksheet = writer.sheets["サービス一覧"]
+            for i in range(1, len(df.columns) + 1):
+                col_letter = worksheet.cell(row=1, column=i).column_letter
+                worksheet.column_dimensions[col_letter].width = column_width
+        return output.getvalue()
+
     st.download_button(
-        "⬇️ サービス一覧をCSVでダウンロード（フィルター適用後）",
-        flatten_for_csv(df_filtered).to_csv(index=False).encode("utf-8-sig"),
-        file_name="coconala_services.csv",
-        mime="text/csv",
+        "⬇️ サービス一覧をExcelでダウンロード（フィルター適用後・列幅コンパクト）",
+        build_excel_bytes(flatten_for_export(df_filtered)),
+        file_name="coconala_services.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
 
