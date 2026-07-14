@@ -365,7 +365,13 @@ if results:
     df_reviews = pd.DataFrame(review_rows)
 
     st.subheader("📋 サービス一覧")
-    st.dataframe(df_main, use_container_width=True)
+    column_config = {
+        "URL": st.column_config.LinkColumn("URL", display_text="開く"),
+    }
+    if "サービス1枚目画像" in df_main.columns:
+        column_config["サービス1枚目画像"] = st.column_config.ImageColumn("画像")
+
+    st.dataframe(df_main, use_container_width=True, column_config=column_config)
 
     col1, col2 = st.columns(2)
 
