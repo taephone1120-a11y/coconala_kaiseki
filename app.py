@@ -383,6 +383,18 @@ if results:
     main_rows = [{k: v for k, v in r.items() if k != "レビュー一覧"} for r in results]
     df_main = pd.DataFrame(main_rows)
 
+    # 列の並び順を「識別→出品者信頼度→比較用の数値→文章・詳細」の順に整える
+    preferred_order = [
+        "URL", "サービス名", "サービス副題", "大カテゴリ", "サブカテゴリ",
+        "販売者名", "ランク", "総販売実績",
+        "価格", "販売実績", "評価総数", "直近1ヶ月の評価件数", "よくある質問数",
+        "サービス内容文字数", "スケジュール", "サービス1枚目画像",
+        "サービス内容", "購入にあたってのお願い", "カテゴリ階層", "レビュー件数(取得分)",
+    ]
+    ordered_cols = [c for c in preferred_order if c in df_main.columns]
+    remaining_cols = [c for c in df_main.columns if c not in ordered_cols]
+    df_main = df_main[ordered_cols + remaining_cols]
+
     review_rows = []
     for r in results:
         for review in r["レビュー一覧"]:
