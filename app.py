@@ -385,11 +385,13 @@ if results:
 
     # 列の並び順を「識別→出品者信頼度→比較用の数値→文章・詳細」の順に整える
     preferred_order = [
-        "URL", "サービス名", "サービス副題", "大カテゴリ", "サブカテゴリ",
+        "URL", "サービス1枚目画像", "サービス名", "サービス副題",
         "販売者名", "ランク", "総販売実績",
         "価格", "販売実績", "評価総数", "直近1ヶ月の評価件数", "よくある質問数",
-        "サービス内容文字数", "スケジュール", "サービス1枚目画像",
-        "サービス内容", "購入にあたってのお願い", "カテゴリ階層", "レビュー件数(取得分)",
+        "サービス内容文字数", "スケジュール",
+        "サービス内容", "購入にあたってのお願い",
+        "カテゴリ階層", "大カテゴリ", "サブカテゴリ",
+        "レビュー件数(取得分)",
     ]
     ordered_cols = [c for c in preferred_order if c in df_main.columns]
     remaining_cols = [c for c in df_main.columns if c not in ordered_cols]
@@ -401,53 +403,124 @@ if results:
             review_rows.append({"URL": r["URL"], "サービス名": r["サービス名"], **review})
     df_reviews = pd.DataFrame(review_rows)
 
+    # =================================================================
+    # フィルター
+    # =================================================================
+
+    def numeric_min_max(series, default_min=0, default_max=100):
+        numeric = pd.to_numeric(series, errors="coerce")
+        if numeric.dropna().empty:
+            return default_min, default_max
+        return int(numeric.min()), int(numeric.max())
+
+    st.subheader("🔍 絞り込み")
+    with st.expander("フィルター条件", expanded=True):
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            rank_options = sorted(df_main["ランク"].dropna().unique().tolist()) if "ランク" in df_main.columns else []
+            selected_ranks = st.multiselect("ランク", rank_options, default=rank_options)
+        with col_f2:
+            category_query = st.text_input(
+                "カテゴリ（部分一致で検索。大カテゴリ・サブカテゴリ・カテゴリ階層が対象）",
+                "",
+            )
+
+        col_f3, col_f4 = st.columns(2)
+        with col_f3:
+            price_lo, price_hi = numeric_min_max(df_main.get("価格", pd.Series(dtype=float)))
+            price_range = st.slider("価格（円）", price_lo, price_hi, (price_lo, price_hi))
+        with col_f4:
+            sales_lo, sales_hi = numeric_min_max(df_main.get("販売実績", pd.Series(dtype=float)))
+            sales_range = st.slider("販売実績（件）", sales_lo, sales_hi, (sales_lo, sales_hi))
+
+        col_f5, col_f6 = st.columns(2)
+        with col_f5:
+            total_sales_lo, total_sales_hi = numeric_min_max(df_main.get("総販売実績", pd.Series(dtype=float)))
+            total_sales_range = st.slider("総販売実績（件）", total_sales_lo, total_sales_hi, (total_sales_lo, total_sales_hi))
+        with col_f6:
+            recent_lo, recent_hi = numeric_min_max(df_main.get("直近1ヶ月の評価件数", pd.Series(dtype=float)))
+            recent_range = st.slider("直近1ヶ月の評価件数", recent_lo, recent_hi, (recent_lo, recent_hi))
+
+    # ---- フィルター適用 ----
+    # 数値項目は欠損値(NaN)を「不明」として常に表示対象に残す
+    df_filtered = df_main.copy()
+
+    if selected_ranks:
+        df_filtered = df_filtered[df_filtered["ランク"].isin(selected_ranks) | df_filtered["ランク"].isna()]
+
+    if category_query:
+        search_cols = [c for c in ["大カテゴリ", "サブカテゴリ", "カテゴリ階層"] if c in df_filtered.columns]
+        if search_cols:
+            mask = pd.Series(False, index=df_filtered.index)
+            for c in search_cols:
+                mask = mask | df_filtered[c].astype(str).str.contains(category_query, case=False, na=False)
+            df_filtered = df_filtered[mask]
+
+    def apply_range_filter(df, col, lo, hi):
+        if col not in df.columns:
+            return df
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        keep = numeric.isna() | numeric.between(lo, hi)
+        return df[keep]
+
+    df_filtered = apply_range_filter(df_filtered, "価格", *price_range)
+    df_filtered = apply_range_filter(df_filtered, "販売実績", *sales_range)
+    df_filtered = apply_range_filter(df_filtered, "総販売実績", *total_sales_range)
+    df_filtered = apply_range_filter(df_filtered, "直近1ヶ月の評価件数", *recent_range)
+
+    st.caption(f"フィルター適用後: {len(df_filtered)} / {len(df_main)} 件")
+
+    # =================================================================
+    # 表示
+    # =================================================================
+
     st.subheader("📋 サービス一覧")
     column_config = {
         "URL": st.column_config.LinkColumn("URL", display_text="開く", width="small"),
     }
-    if "サービス1枚目画像" in df_main.columns:
+    if "サービス1枚目画像" in df_filtered.columns:
         column_config["サービス1枚目画像"] = st.column_config.ImageColumn("画像", width="small")
 
     # URLと画像以外の列は、すべて幅を「small」に固定して表を狭くする
-    for col in df_main.columns:
+    for col in df_filtered.columns:
         if col not in column_config:
             column_config[col] = st.column_config.Column(width="small")
 
-    st.dataframe(df_main, use_container_width=True, column_config=column_config)
+    st.dataframe(df_filtered, use_container_width=True, column_config=column_config)
 
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("💰 価格帯の分布")
-        if df_main["価格"].notna().any():
-            st.bar_chart(df_main["価格"].dropna())
+        if df_filtered["価格"].notna().any():
+            st.bar_chart(df_filtered["価格"].dropna())
 
     with col2:
         st.subheader("🏅 ランク別 件数")
-        if "ランク" in df_main.columns:
-            rank_counts = df_main["ランク"].value_counts()
+        if "ランク" in df_filtered.columns:
+            rank_counts = df_filtered["ランク"].value_counts()
             st.bar_chart(rank_counts)
 
     col3, col4 = st.columns(2)
 
     with col3:
         st.subheader("👤 出品者別 出品数（上位10件）")
-        if "販売者名" in df_main.columns:
-            seller_counts = df_main["販売者名"].value_counts().head(10)
+        if "販売者名" in df_filtered.columns:
+            seller_counts = df_filtered["販売者名"].value_counts().head(10)
             st.bar_chart(seller_counts)
 
     with col4:
         st.subheader("⭐ 評価総数 上位10件")
-        if "評価総数" in df_main.columns:
-            top_rated = df_main.nlargest(10, "評価総数")[["サービス名", "評価総数"]].set_index("サービス名")
+        if "評価総数" in df_filtered.columns:
+            top_rated = df_filtered.nlargest(10, "評価総数")[["サービス名", "評価総数"]].set_index("サービス名")
             st.bar_chart(top_rated)
 
     st.subheader("⬇️ ダウンロード")
     dcol1, dcol2 = st.columns(2)
     with dcol1:
         st.download_button(
-            "サービス一覧をCSVでダウンロード",
-            df_main.to_csv(index=False).encode("utf-8-sig"),
+            "サービス一覧をCSVでダウンロード（フィルター適用後）",
+            df_filtered.to_csv(index=False).encode("utf-8-sig"),
             file_name="coconala_services.csv",
             mime="text/csv",
             use_container_width=True,
