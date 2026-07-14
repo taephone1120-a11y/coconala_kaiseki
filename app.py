@@ -174,9 +174,9 @@ def scrape_coconala_service(url):
     rank_img = soup.find("img", alt=re.compile(r"^出品者ランク："))
     if rank_img:
         m = re.search(r"出品者ランク：(.+)", rank_img["alt"])
-        data["ランク"] = m.group(1) if m else None
+        data["ランク"] = m.group(1) if m else "なし"
     else:
-        data["ランク"] = None
+        data["ランク"] = "なし"
 
     price_tag = soup.select_one("span.c-spTabMainButtonsPrice_price")
     price_raw = price_tag.get_text(strip=True) if price_tag else None
