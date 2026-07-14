@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import requests
 import pandas as pd
 import streamlit as st
+import altair as alt
 from bs4 import BeautifulSoup
 
 # =====================================================================
@@ -500,14 +501,11 @@ if results:
     # グラフ: 「直近1ヶ月に評価が付いたか」の割合を軸別に見る
     # =================================================================
 
-    def build_ratio_table(df, group_col, category_order=None, top_n=None):
-        """
-        group_col ごとに「直近1ヶ月の評価件数が1件以上／0件」の割合(%)を集計する。
-        戻り値: (割合のDataFrame, 件数のDataFrame)
-        """
+    def build_ratio_counts(df, group_col, top_n=None):
+        """group_col ごとに「直近1ヶ月の評価件数が1件以上／0件」の件数を集計する"""
         tmp = df.dropna(subset=[group_col]).copy()
         if tmp.empty:
-            return pd.DataFrame(), pd.DataFrame()
+            return pd.DataFrame()
 
         tmp["区分"] = pd.to_numeric(tmp["直近1ヶ月の評価件数"], errors="coerce").fillna(0).apply(
             lambda x: "1件以上" if x >= 1 else "0件"
@@ -521,11 +519,52 @@ if results:
         if top_n is not None:
             counts = counts.loc[counts.sum(axis=1).sort_values(ascending=False).head(top_n).index]
 
-        if category_order is not None:
-            counts = counts.reindex([c for c in category_order if c in counts.index])
+        return counts
+
+    def render_ratio_chart(counts, group_col, order=None):
+        """
+        件数のDataFrame(counts)から、100%積み上げ棒グラフをAltairで描画する。
+        - x軸の並び順を order で指定可能
+        - ツールチップは「項目名 → 区分 → 割合(小数点1桁 + %)」の順で表示
+        """
+        if counts.empty:
+            st.info("表示できるデータがありません。")
+            return
 
         pct = counts.div(counts.sum(axis=1), axis=0) * 100
-        return pct, counts
+        if order:
+            pct = pct.reindex([c for c in order if c in pct.index])
+            counts = counts.reindex([c for c in order if c in counts.index])
+
+        long_df = pct.reset_index().melt(id_vars=group_col, var_name="区分", value_name="割合")
+        long_df["割合表示"] = long_df["割合"].map(lambda v: f"{v:.1f}%")
+
+        x_sort = list(pct.index) if order is None else [c for c in order if c in pct.index]
+
+        chart = (
+            alt.Chart(long_df)
+            .mark_bar()
+            .encode(
+                x=alt.X(f"{group_col}:N", sort=x_sort, title=group_col),
+                y=alt.Y("割合:Q", title="割合（%）", stack="zero"),
+                color=alt.Color(
+                    "区分:N",
+                    scale=alt.Scale(domain=["0件", "1件以上"], range=["#c6dbef", "#08519c"]),
+                    legend=alt.Legend(title="区分"),
+                ),
+                order=alt.Order("区分:N", sort="descending"),
+                tooltip=[
+                    alt.Tooltip(f"{group_col}:N", title=group_col),
+                    alt.Tooltip("区分:N", title="区分"),
+                    alt.Tooltip("割合表示:N", title="割合"),
+                ],
+            )
+            .properties(height=350)
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+        with st.expander(f"件数の内訳を見る（{group_col}別）"):
+            st.dataframe(counts, use_container_width=True)
 
     st.subheader("📊 直近1ヶ月の評価有無（1件以上 / 0件）の割合")
 
@@ -539,37 +578,23 @@ if results:
     df_for_chart["価格帯"] = pd.cut(
         pd.to_numeric(df_for_chart["価格"], errors="coerce"),
         bins=price_bins, labels=price_labels,
-    )
+    ).astype(str)
 
     st.markdown("**価格帯別**")
-    pct_price, counts_price = build_ratio_table(df_for_chart, "価格帯", category_order=price_labels)
-    if not pct_price.empty:
-        st.bar_chart(pct_price)
-        with st.expander("件数の内訳を見る（価格帯別）"):
-            st.dataframe(counts_price, use_container_width=True)
-    else:
-        st.info("価格帯別に表示できるデータがありません。")
+    counts_price = build_ratio_counts(df_for_chart, "価格帯")
+    render_ratio_chart(counts_price, "価格帯", order=price_labels)
 
     # ---- ランク別 ----
-    rank_order = ["プラチナ", "ゴールド", "シルバー", "ブロンズ", "レギュラー", "なし"]
+    rank_order = ["なし", "レギュラー", "ブロンズ", "シルバー", "ゴールド", "プラチナ"]
     st.markdown("**ランク別**")
-    pct_rank, counts_rank = build_ratio_table(df_filtered, "ランク", category_order=rank_order)
-    if not pct_rank.empty:
-        st.bar_chart(pct_rank)
-        with st.expander("件数の内訳を見る（ランク別）"):
-            st.dataframe(counts_rank, use_container_width=True)
-    else:
-        st.info("ランク別に表示できるデータがありません。")
+    counts_rank = build_ratio_counts(df_filtered, "ランク")
+    render_ratio_chart(counts_rank, "ランク", order=rank_order)
 
     # ---- サブカテゴリ別 ----
     st.markdown("**サブカテゴリ別**（件数の多い上位15件のみ表示）")
-    pct_sub, counts_sub = build_ratio_table(df_filtered, "サブカテゴリ", top_n=15)
-    if not pct_sub.empty:
-        st.bar_chart(pct_sub)
-        with st.expander("件数の内訳を見る（サブカテゴリ別）"):
-            st.dataframe(counts_sub, use_container_width=True)
-    else:
-        st.info("サブカテゴリ別に表示できるデータがありません。")
+    counts_sub = build_ratio_counts(df_filtered, "サブカテゴリ", top_n=15)
+    counts_sub_sorted_order = counts_sub.sum(axis=1).sort_values(ascending=False).index.tolist() if not counts_sub.empty else None
+    render_ratio_chart(counts_sub, "サブカテゴリ", order=counts_sub_sorted_order)
 
     st.subheader("⬇️ ダウンロード")
     dcol1, dcol2 = st.columns(2)
