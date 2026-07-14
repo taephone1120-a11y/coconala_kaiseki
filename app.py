@@ -312,6 +312,50 @@ with st.sidebar:
     stop_clicked = st.button("⏹ 停止", use_container_width=True,
                               disabled=not st.session_state.running)
 
+    st.divider()
+    st.header("フィルター条件")
+
+    # フィルターの初期値は、これまでに取得済みのデータを元に計算する
+    # （まだ何も取得していない場合は広めの既定値を使う）
+    _prev_rows = [{k: v for k, v in r.items() if k != "レビュー一覧"} for r in st.session_state.results]
+    _prev_df = pd.DataFrame(_prev_rows) if _prev_rows else pd.DataFrame()
+
+    def _num_bounds(col, fallback_lo, fallback_hi):
+        if col in _prev_df.columns:
+            numeric = pd.to_numeric(_prev_df[col], errors="coerce")
+            if not numeric.dropna().empty:
+                return int(numeric.min()), int(numeric.max())
+        return fallback_lo, fallback_hi
+
+    rank_options = sorted(_prev_df["ランク"].dropna().unique().tolist()) if "ランク" in _prev_df.columns else []
+    selected_ranks = st.multiselect("ランク", rank_options, default=rank_options)
+
+    category_query = st.text_input("カテゴリ（部分一致で検索）", "")
+
+    st.caption("価格（円）")
+    _lo, _hi = _num_bounds("価格", 0, 100000)
+    pc1, pc2 = st.columns(2)
+    price_min_input = pc1.number_input("最小", value=_lo, step=100, key="price_min")
+    price_max_input = pc2.number_input("最大", value=_hi, step=100, key="price_max")
+
+    st.caption("販売実績（件）")
+    _lo, _hi = _num_bounds("販売実績", 0, 10000)
+    sc1, sc2 = st.columns(2)
+    sales_min_input = sc1.number_input("最小", value=_lo, step=1, key="sales_min")
+    sales_max_input = sc2.number_input("最大", value=_hi, step=1, key="sales_max")
+
+    st.caption("総販売実績（件）")
+    _lo, _hi = _num_bounds("総販売実績", 0, 100000)
+    tc1, tc2 = st.columns(2)
+    total_sales_min_input = tc1.number_input("最小", value=_lo, step=1, key="total_sales_min")
+    total_sales_max_input = tc2.number_input("最大", value=_hi, step=1, key="total_sales_max")
+
+    st.caption("直近1ヶ月の評価件数")
+    _lo, _hi = _num_bounds("直近1ヶ月の評価件数", 0, 1000)
+    rc1, rc2 = st.columns(2)
+    recent_min_input = rc1.number_input("最小", value=_lo, step=1, key="recent_min")
+    recent_max_input = rc2.number_input("最大", value=_hi, step=1, key="recent_max")
+
 # ---- ボタン処理 ----
 if start_clicked and not st.session_state.running:
     st.session_state.category_url = category_url_input
@@ -404,45 +448,9 @@ if results:
     df_reviews = pd.DataFrame(review_rows)
 
     # =================================================================
-    # フィルター
+    # フィルター適用（条件はサイドバーで指定済み）
     # =================================================================
 
-    def numeric_min_max(series, default_min=0, default_max=100):
-        numeric = pd.to_numeric(series, errors="coerce")
-        if numeric.dropna().empty:
-            return default_min, default_max
-        return int(numeric.min()), int(numeric.max())
-
-    st.subheader("🔍 絞り込み")
-    with st.expander("フィルター条件", expanded=True):
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            rank_options = sorted(df_main["ランク"].dropna().unique().tolist()) if "ランク" in df_main.columns else []
-            selected_ranks = st.multiselect("ランク", rank_options, default=rank_options)
-        with col_f2:
-            category_query = st.text_input(
-                "カテゴリ（部分一致で検索。大カテゴリ・サブカテゴリ・カテゴリ階層が対象）",
-                "",
-            )
-
-        col_f3, col_f4 = st.columns(2)
-        with col_f3:
-            price_lo, price_hi = numeric_min_max(df_main.get("価格", pd.Series(dtype=float)))
-            price_range = st.slider("価格（円）", price_lo, price_hi, (price_lo, price_hi))
-        with col_f4:
-            sales_lo, sales_hi = numeric_min_max(df_main.get("販売実績", pd.Series(dtype=float)))
-            sales_range = st.slider("販売実績（件）", sales_lo, sales_hi, (sales_lo, sales_hi))
-
-        col_f5, col_f6 = st.columns(2)
-        with col_f5:
-            total_sales_lo, total_sales_hi = numeric_min_max(df_main.get("総販売実績", pd.Series(dtype=float)))
-            total_sales_range = st.slider("総販売実績（件）", total_sales_lo, total_sales_hi, (total_sales_lo, total_sales_hi))
-        with col_f6:
-            recent_lo, recent_hi = numeric_min_max(df_main.get("直近1ヶ月の評価件数", pd.Series(dtype=float)))
-            recent_range = st.slider("直近1ヶ月の評価件数", recent_lo, recent_hi, (recent_lo, recent_hi))
-
-    # ---- フィルター適用 ----
-    # 数値項目は欠損値(NaN)を「不明」として常に表示対象に残す
     df_filtered = df_main.copy()
 
     if selected_ranks:
@@ -463,10 +471,10 @@ if results:
         keep = numeric.isna() | numeric.between(lo, hi)
         return df[keep]
 
-    df_filtered = apply_range_filter(df_filtered, "価格", *price_range)
-    df_filtered = apply_range_filter(df_filtered, "販売実績", *sales_range)
-    df_filtered = apply_range_filter(df_filtered, "総販売実績", *total_sales_range)
-    df_filtered = apply_range_filter(df_filtered, "直近1ヶ月の評価件数", *recent_range)
+    df_filtered = apply_range_filter(df_filtered, "価格", price_min_input, price_max_input)
+    df_filtered = apply_range_filter(df_filtered, "販売実績", sales_min_input, sales_max_input)
+    df_filtered = apply_range_filter(df_filtered, "総販売実績", total_sales_min_input, total_sales_max_input)
+    df_filtered = apply_range_filter(df_filtered, "直近1ヶ月の評価件数", recent_min_input, recent_max_input)
 
     st.caption(f"フィルター適用後: {len(df_filtered)} / {len(df_main)} 件")
 
