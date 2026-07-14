@@ -248,6 +248,31 @@ def scrape_coconala_service(url):
 # =====================================================================
 
 st.set_page_config(page_title="ココナラ競合分析ツール", layout="wide")
+
+# ---- 全体の文字サイズを小さくするカスタムCSS ----
+st.markdown(
+    """
+    <style>
+    html, body, [class*="css"] {
+        font-size: 12px !important;
+    }
+    h1 { font-size: 22px !important; }
+    h2 { font-size: 18px !important; }
+    h3 { font-size: 15px !important; }
+    [data-testid="stSidebar"] * {
+        font-size: 12px !important;
+    }
+    [data-testid="stDataFrame"] * {
+        font-size: 11px !important;
+    }
+    button {
+        font-size: 12px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🔮 ココナラ競合分析ツール")
 
 # ---- セッション状態の初期化 ----
@@ -366,10 +391,15 @@ if results:
 
     st.subheader("📋 サービス一覧")
     column_config = {
-        "URL": st.column_config.LinkColumn("URL", display_text="開く"),
+        "URL": st.column_config.LinkColumn("URL", display_text="開く", width="small"),
     }
     if "サービス1枚目画像" in df_main.columns:
-        column_config["サービス1枚目画像"] = st.column_config.ImageColumn("画像")
+        column_config["サービス1枚目画像"] = st.column_config.ImageColumn("画像", width="small")
+
+    # URLと画像以外の列は、すべて幅を「small」に固定して表を狭くする
+    for col in df_main.columns:
+        if col not in column_config:
+            column_config[col] = st.column_config.Column(width="small")
 
     st.dataframe(df_main, use_container_width=True, column_config=column_config)
 
