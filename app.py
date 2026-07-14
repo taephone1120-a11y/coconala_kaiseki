@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 # アクセス間隔（秒）。サーバー負荷を抑えるための固定値。UIでは変更できません。
-SLEEP_SEC = 1.0
+SLEEP_SEC = 2.0
 
 
 # =====================================================================
@@ -442,12 +442,6 @@ if results:
     remaining_cols = [c for c in df_main.columns if c not in ordered_cols]
     df_main = df_main[ordered_cols + remaining_cols]
 
-    review_rows = []
-    for r in results:
-        for review in r["レビュー一覧"]:
-            review_rows.append({"URL": r["URL"], "サービス名": r["サービス名"], **review})
-    df_reviews = pd.DataFrame(review_rows)
-
     # =================================================================
     # フィルター適用（条件はサイドバーで指定済み）
     # =================================================================
@@ -496,6 +490,27 @@ if results:
             column_config[col] = st.column_config.Column(width="small")
 
     st.dataframe(df_filtered, use_container_width=True, column_config=column_config)
+
+    def flatten_for_csv(df):
+        """
+        セル内の改行(\\r\\n・\\n)をスペースに置き換え、
+        Excel等で開いたときに1行1レコードになるようにする（ダウンロード用のみ）。
+        """
+        df = df.copy()
+        for col in df.columns:
+            if df[col].dtype == object:
+                df[col] = df[col].apply(
+                    lambda v: v.replace("\r\n", " ").replace("\n", " ") if isinstance(v, str) else v
+                )
+        return df
+
+    st.download_button(
+        "⬇️ サービス一覧をCSVでダウンロード（フィルター適用後）",
+        flatten_for_csv(df_filtered).to_csv(index=False).encode("utf-8-sig"),
+        file_name="coconala_services.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
     # =================================================================
     # グラフ: 「直近1ヶ月に評価が付いたか」の割合を軸別に見る
@@ -595,24 +610,5 @@ if results:
     counts_sub = build_ratio_counts(df_filtered, "サブカテゴリ", top_n=15)
     counts_sub_sorted_order = counts_sub.sum(axis=1).sort_values(ascending=False).index.tolist() if not counts_sub.empty else None
     render_ratio_chart(counts_sub, "サブカテゴリ", order=counts_sub_sorted_order)
-
-    st.subheader("⬇️ ダウンロード")
-    dcol1, dcol2 = st.columns(2)
-    with dcol1:
-        st.download_button(
-            "サービス一覧をCSVでダウンロード（フィルター適用後）",
-            df_filtered.to_csv(index=False).encode("utf-8-sig"),
-            file_name="coconala_services.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-    with dcol2:
-        st.download_button(
-            "レビュー詳細をCSVでダウンロード",
-            df_reviews.to_csv(index=False).encode("utf-8-sig"),
-            file_name="coconala_reviews.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
 else:
     st.info("左のサイドバーで条件を設定し、「分析開始」を押してください。")
