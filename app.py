@@ -279,7 +279,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🔮 ココナラ競合分析ツール")
+st.title("🍀 ココナラ競合分析ツール")
 
 # ---- セッション状態の初期化 ----
 if "urls" not in st.session_state:
