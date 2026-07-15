@@ -209,11 +209,15 @@ def scrape_coconala_service(url):
     data["スケジュール"] = extract_full_schedule(html)
 
     image_alts = soup.find_all("img", alt=re.compile(r"イメージ\d+"))
-    first_img = None
+    image_numbers, first_img = set(), None
     for img in image_alts:
         m = re.search(r"イメージ(\d+)", img["alt"])
-        if m and m.group(1) == "1" and img.get("src", "").startswith("http") and first_img is None:
-            first_img = img["src"]
+        if m:
+            num = int(m.group(1))
+            image_numbers.add(num)
+            if num == 1 and img.get("src", "").startswith("http") and first_img is None:
+                first_img = img["src"]
+    data["サービス画像枚数"] = max(image_numbers) if image_numbers else 0
     data["サービス1枚目画像"] = first_img
 
     faq_count = len(re.findall(r"回答を見る", soup.get_text()))
@@ -275,7 +279,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🍀 ココナラ競合分析ツール")
+st.title("🔮 ココナラ競合分析ツール")
 
 # ---- セッション状態の初期化 ----
 if "urls" not in st.session_state:
@@ -434,7 +438,7 @@ if results:
         "URL", "サービス1枚目画像", "サービス名", "サービス副題",
         "販売者名", "ランク", "総販売実績",
         "価格", "販売実績", "評価総数", "直近1ヶ月の評価件数", "よくある質問数",
-        "サービス内容文字数", "スケジュール",
+        "サービス内容文字数", "サービス画像枚数", "スケジュール",
         "サービス内容", "購入にあたってのお願い",
         "カテゴリ階層", "大カテゴリ", "サブカテゴリ",
         "レビュー件数(取得分)",
