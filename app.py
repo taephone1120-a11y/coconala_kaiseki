@@ -307,7 +307,7 @@ with st.sidebar:
 
     st.divider()
     st.header("取得設定")
-    max_count = st.number_input("取得件数", min_value=1, max_value=10, value=10, step=1)
+    max_count = st.number_input("取得件数", min_value=1, max_value=1000, value=10, step=1)
     st.caption(f"アクセス間隔は {SLEEP_SEC} 秒に固定しています（サーバー負荷軽減のため）")
 
     st.divider()
