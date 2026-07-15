@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 # アクセス間隔（秒）。サーバー負荷を抑えるための固定値。UIでは変更できません。
-SLEEP_SEC = 2.0
+SLEEP_SEC = 1.0
 
 
 # =====================================================================
